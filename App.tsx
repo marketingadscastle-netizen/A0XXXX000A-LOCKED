@@ -288,7 +288,7 @@ const App: React.FC = () => {
     if (audioQueueRef.current.length > 0 && !isPlayingRef.current) {
         playNextInQueue();
     }
-  }, [queue, playNextInQueue]); // Trigger when queue changes (indirectly) or manually called
+  }, [queue, playNextInQueue]); 
 
 
   // --- AI PROCESSING LOOP (THE BRAIN) ---
@@ -296,16 +296,20 @@ const App: React.FC = () => {
     if (!isCapturing || !isRunning) return;
 
     const processQueue = async () => {
-      // We can process NEW chats even if audio is currently playing (isPlayingRef is ignored here)
-      // We only block if we are currently *generating* a response (processingRef)
+      // FLOW CONTROL:
+      // If the audio queue is getting too long (talking too much), pause processing new chats.
+      // This prevents the "Laggy Bot" feel where the answer comes 30 seconds late.
+      // We wait until the queue drains to 1 or 0 items.
+      if (audioQueueRef.current.length > 2) {
+         return; 
+      }
+
       if (processingRef.current || queueRef.current.length === 0) return;
       
       processingRef.current = true;
-      // Note: We don't set status to THINKING globally here to avoid flickering the UI 
-      // if audio is already playing (SPEAKING). The Audio Loop controls the visual status mostly.
       if (!isPlayingRef.current) setStatus(SystemStatus.THINKING);
 
-      const batch = queueRef.current.slice(0, 8); // Smaller batch for faster reaction
+      const batch = queueRef.current.slice(0, 8); 
       const remaining = queueRef.current.slice(8);
       setQueue(remaining);
 
@@ -322,8 +326,8 @@ const App: React.FC = () => {
       const start = Date.now();
       const mode = batch.length > 0 ? 'reactive' : 'proactive';
 
-      // Low chance of proactive chatter if we are already busy speaking or have queued audio
-      if (mode === 'proactive' && (audioQueueRef.current.length > 0 || isPlayingRef.current || Math.random() > 0.4)) {
+      // Avoid proactive chatter if we have stuff in the audio queue
+      if (mode === 'proactive' && (audioQueueRef.current.length > 0 || isPlayingRef.current)) {
          processingRef.current = false;
          return;
       }
@@ -346,7 +350,12 @@ const App: React.FC = () => {
       setLatency(Date.now() - start);
 
       if (response.intent !== 'ignore' && response.text_answer) {
-        // --- 1. PREPARE LOG ENTRY ---
+        // Double check for duplicate answers in frontend too to save TTS resources
+        if (response.text_answer === lastAnswer) {
+             processingRef.current = false;
+             return;
+        }
+
         const newLog: LogEntry = {
           id: Date.now().toString(),
           timestamp: Date.now(),
@@ -362,14 +371,12 @@ const App: React.FC = () => {
         }
 
         // --- 2. GENERATE AUDIO (ASYNC) ---
-        // This is the "Thinking" part. It happens independently of playback.
         const audioData = await geminiService.current.generateTTS(response.text_answer, gender, personality);
         
         if (audioData && audioContext.current) {
           const buffer = await decodeAudioBuffer(audioData, audioContext.current);
           
           // --- 3. PUSH TO AUDIO QUEUE ---
-          // Instead of playing immediately, we queue it.
           audioQueueRef.current.push({
             buffer: buffer,
             logEntry: newLog
@@ -382,8 +389,6 @@ const App: React.FC = () => {
         }
       }
 
-      // Unlock processing immediately so we can fetch the next batch
-      // while the previous batch is still being spoken.
       processingRef.current = false;
       
       // If messages piled up, recurse immediately

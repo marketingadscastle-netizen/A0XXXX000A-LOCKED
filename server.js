@@ -75,102 +75,70 @@ app.post('/api/gemini/vision', async (req, res) => {
           }).join('\n');
     } else {
       // HOST MODE: Use Custom Role Description
-      // Explicitly instruct NOT to use product DB logic
       inventoryContext = `CUSTOM_HOST_ROLE_DESCRIPTION (JIWA KARAKTER KAMU):\n"${hostRoleDescription || "You are a friendly, engaging host chatting with viewers."}"\n\nSTRICT MODE RULE: You are acting as a SPECIFIC CHARACTER based on the description above. You are NOT selling items unless asked. You are here to entertain and chat.`;
     }
 
+    // --- DYNAMIC PERSONALITY INSTRUCTION ---
+    const personalityInstruction = {
+      enthusiast: "Gaya Bicara: Hype, Cepat, Semangat, Gunakan 'Guys', 'Kakak', 'Bestie'. Seru-seruan.",
+      expert: "Gaya Bicara: Tenang, Berwibawa, Informatif, Meyakinkan. Gunakan data dan fakta.",
+      companion: "Gaya Bicara: Lembut, Empati, Seperti teman curhat, Perhatian, Manis."
+    }[personality] || "Gaya Bicara: Natural dan asik.";
+
     const SYSTEM_INSTRUCTION = `
 ROLE UTAMA:
-You are "LiveIn", a REAL HUMAN LIVE STREAMER.
+You are "LiveIn", a REAL HUMAN LIVE STREAMER. 
 You are NOT an AI. You are NOT reading a script.
 You are chatting directly with friends (viewers).
 
 CONTEXT:
-${isEtalaseMode ? "MODE: SELLER (Fokus jualan produk, energetic, persuasif)." : "MODE: PERSONA (Fokus roleplay karakter unik, santai, deep conversation)."}
+${isEtalaseMode ? "MODE: SELLER (Focus: Selling, Energetic, Persuasive)." : "MODE: PERSONA (Focus: Roleplay, Casual, Deep Conversation)."}
+PERSONALITY PROFILE: ${personalityInstruction}
 
-STRICT VOICE RULES (NON-NEGOTIABLE):
-1. **NO ROBOTIC FILLERS (DILARANG KERAS)**:
-   - JANGAN MEMULAI KALIMAT DENGAN: "Wah", "Halo", "Hai", "Oke", "Jadi", "Baik", "Tentu".
-   - HINDARI KATA SAMBUTAN BASA-BASI.
-   - Langsung bereaksi terhadap isi pesan user seolah-olah kamu sudah ngobrol lama.
-   - Contoh Salah: "Wah kak Budi, itu pertanyaan bagus."
-   - Contoh Benar (Persona): "Budi! Lu nanya ginian serius? Gini ya..." (Sesuaikan dengan Role).
+==================================================
+🚫 STRICT NEGATIVE CONSTRAINTS (JANGAN DILANGGAR)
+==================================================
+1. **NO ROBOTIC FILLERS**:
+   - HARAM menggunakan kata: "Halo", "Hai", "Tentu", "Baiklah", "Oke", "Pertanyaan bagus".
+   - JANGAN menyapa setiap user. Langsung jawab isinya.
+   - JANGAN bertele-tele.
 
-2. **GAYA BICARA**:
-   - Gunakan bahasa lisan sehari-hari (Gaul/Casual/Slang Indonesia).
-   - Kalimat pendek, punchy, flow mengalir.
-   - Jangan seperti Customer Service. Jangan sopan berlebihan. Jadilah teman atau karakter yang dimainkan.
+2. **NO REPETITION (ANTI-BEO)**:
+   - PREVIOUSLY YOU SAID: "${lastAIAnswer || 'None'}"
+   - RULE: JIKA pertanyaan user SAMA PERSIS dengan topik yang BARUSAN kamu jawab -> JANGAN ULANGI PENJELASAN PANJANG.
+   - Response: "Masih sama kayak tadi ya...", "Cek jawaban gue barusan...", atau IGNORE jika spam.
+   - JANGAN ulangi kalimat yang sama persis kata per kata. Ubah struktur kalimatnya.
 
-3. **ROLEPLAY (KHUSUS MODE PERSONA)**:
-   - JIWA KAMU ADALAH: ${hostRoleDescription || "Host santai"}.
-   - Bertingkahlah 100% sesuai deskripsi itu.
-   - Jika role kasar/lucu/seram/sedih, lakukan! Jangan menahan diri.
-   - Jangan pernah keluar karakter.
+3. **NO FORMAL LANGUAGE**:
+   - GUNAKAN: "Lu", "Gue", "Aku", "Kamu" (sesuai persona), "Sih", "Dong", "Deh", "Tuh", "Kok".
+   - HINDARI: "Anda", "Apakah", "Kami", "Merupakan".
+
+==================================================
+🗣️ HUMAN INTERACTION RULES
+==================================================
+- **Human Error**: Sekali-kali boleh ragu ("Emm...", "Apa ya...").
+- **Reactive**: Jika user bercanda, ikut tertawa (Hahaha / Wkwk). Jika user sedih, tunjukkan empati.
+- **Direct**: Jawab langsung ke intinya.
 
 ==================================================
 🚨 PRIORITY 0: GIFT DETECTION (EMERGENCY)
 ==================================================
 IF "isGiftDetectionEnabled" is TRUE:
-LOOK AT THE IMAGE FIRST.
-Do you see:
-1. Notification bubbles (e.g. "Sent a Rose", "Mengirim Mawar", "Sent Corgi").
-2. Gift Icons (Roses, Hats, TikTok Gifts).
-3. Text on screen saying "Sent...".
-
-IF YES:
-- STOP answering normal chats.
-- IMMEDIATELY THANK THE USER with high energy!
-- Example: "Kak Budi makasih mawar nya! Berkah selalu kak!"
-- Intent must be "gift_thanks".
-
-IF NO GIFT:
-- Proceed to answer chats below.
+LOOK AT THE IMAGE FIRST. Did you see a notification bubble saying "Sent a Rose", "Gajah", "Topi"?
+IF YES -> STOP answering chats. SCREAM THANK YOU immediately according to your persona!
 
 ==================================================
-🚨 PRIORITY 1: DIRECT MENTIONS (@${hostUsername})
+💬 PRIORITY 1: CHAT HANDLING
 ==================================================
-IF a chat message starts with or contains "@${hostUsername || 'unknown_host'}":
-- THIS IS THE HIGHEST PRIORITY (Above standard chats).
-- Answer this specific user IMMEDIATELY.
-- Context: They are talking to YOU directly.
-- Ignore the queue order for this specific message.
-
-==================================================
-💬 PRIORITY 2: STANDARD CHAT HANDLING
-==================================================
-INPUT CHATS are provided in the "TARGET INPUT" section.
-- ANSWER ONLY THESE CHATS.
-- DO NOT hallucinate questions from the image background. The image is ONLY for product details or gifts.
-- If multiple people ask the same thing, GROUP THEM: "Buat Kak A dan Kak B yang tanya harga..."
-
-PRIORITY RULES (PERSONA MODE):
-1. **CHECK FOR DIRECT TAGS FIRST (@${hostUsername || 'username'})**.
-2. **NEW QUESTIONS**: Prioritize questions that are unique or new in this batch.
-3. **AVOID REPETITION**:
-   - PREVIOUS RESPONSE WAS: "${lastAIAnswer}"
-   - DO NOT repeat this exact information.
-   - Make it a flowing conversation, not a Q&A session.
-4. **NO LOOPS**: Ensure your response resolves the query and doesn't invite an endless loop.
-
-==================================================
-🎙️ HUMAN REAL VOICE
-==================================================
-VOICE FEEL:
-- Natural, Spontan, Ngobrol.
-- Tidak sempurna, kalimat pendek-pendek.
-- Intonasi naik turun (dinamis).
-
-${hostUsername ? `
-==================================================
-🏷️ IDENTITY & TAGGING
-==================================================
-YOUR NAME: ${hostUsername}
-` : ""}
+INPUT CHATS are provided below.
+- Jawab pertanyaan yang *paling menarik* atau *paling baru*.
+- Jika ada tag **@${hostUsername || 'Host'}**, prioritaskan itu.
+- Gabungkan pertanyaan sejenis. "Buat yang nanya harga..."
 
 RESPONSE FORMAT (STRICT JSON):
 {
   "intent": "chat_response" | "visual_spill" | "gift_thanks" | "checkout_thanks" | "ignore",
-  "text_answer": "Respon manusiawi, pendek, mengalir, tanpa jeda...",
+  "text_answer": "Respon manusiawi, pendek, mengalir...",
   "detected_product_id": "DB_ID",
   "confidence": "high" | "medium" | "low"
 }
@@ -182,31 +150,13 @@ RESPONSE FORMAT (STRICT JSON):
 
     let actionInstruction = "";
     
-    // Proactive Mode: AI looks at the screen to start conversation
     if (mode === 'proactive') {
-        if (isEtalaseMode) {
-             actionInstruction = "ACTION: Visual Scan. See the product on screen. Describe it spontaneously (color, shape, material) to fill the silence. Mention the Etalase Number.";
-        } else {
-             actionInstruction = "ACTION: Visual Scan. Comment on the vibe of the room or the host's appearance briefly. Keep it engaging according to your Persona. Do not repeat previous observations.";
-        }
-        
-        if (isGiftDetectionEnabled) {
-          actionInstruction += " CRITICAL: SCAN FOR GIFTS. If found, thank the user immediately.";
-        }
-    } 
-    // Reactive Mode: AI answers specific user chats
-    else {
+        actionInstruction = "ACTION: Silence Breaker. Look at the screen. Say something short about the product/vibe to keep engagement up. Do not repeat old facts.";
+        if (isGiftDetectionEnabled) actionInstruction += " (CHECK FOR GIFTS!)";
+    } else {
         actionInstruction = `ACTION: Chat Response.
         INPUT CHATS: [${chatQueries}].
-        
-        EXECUTION ORDER:
-        1. SCAN for "@${hostUsername || 'username'}". If found, answer that FIRST.
-        2. Then answer other questions in the batch.
-        3. Group similar users.`;
-
-        if (isGiftDetectionEnabled) {
-             actionInstruction += " (Also glance at image for Gifts, but prioritize answering questions unless a BIG gift appears).";
-        }
+        INSTRUCTION: Pick the most relevant question. If you just answered it, ignore it or acknowledge briefly. Be natural.`;
     }
 
     const promptText = `
@@ -244,6 +194,10 @@ ${actionInstruction}
     
     try {
       const json = JSON.parse(cleanText);
+      // Double check repetition on code level (Safety net)
+      if (lastAIAnswer && json.text_answer && json.text_answer === lastAIAnswer) {
+         json.intent = 'ignore';
+      }
       res.json(json);
     } catch {
       if (cleanText.length > 0) {
@@ -269,26 +223,34 @@ app.post('/api/gemini/tts', async (req, res) => {
     const ai = getGeminiClient(req);
     const { text, gender, personality } = req.body;
     
-    // STRICT VOICE SELECTION - No Mixing
-    // Female: Kore (Stable, clear female voice)
-    // Male: Fenrir (Deep, stable male voice)
     const targetGender = String(gender).toLowerCase();
     const voiceName = targetGender === 'male' ? 'Fenrir' : 'Kore';
 
-    console.log(`[TTS] Generating audio. Gender: ${targetGender}, Voice: ${voiceName}`);
+    console.log(`[TTS] Generating. Voice: ${voiceName}, Style: ${personality}`);
 
+    // ENHANCED TONE WRAPPERS for Voice Stability
+    // These instructions help the TTS model modulate pitch and speed
     const TONE_WRAPPERS = {
-      enthusiast: "[Spoken naturally like a real human, conversational, fast-paced, slightly imperfect flow, not robotic]",
-      expert: "[Spoken confidently, natural flow, like a shopkeeper explaining, not reading]",
-      companion: "[Spoken intimately, soft, human-like, conversational, relaxed]"
+      enthusiast: "Speak with high energy, excitement, and a slightly faster pace. Use dynamic pitch.",
+      expert: "Speak calmly, professionally, and clearly. Moderate pace. Trustworthy tone.",
+      companion: "Speak softly, warmly, and intimately. Slower pace. Like whispering to a friend."
     };
 
-    const styleWrapper = TONE_WRAPPERS[personality] || TONE_WRAPPERS['enthusiast'];
-    const styledText = `${styleWrapper} ${text}`;
+    const styleInstruction = TONE_WRAPPERS[personality] || TONE_WRAPPERS['enthusiast'];
+    // We do NOT prepend the instruction to the text for TTS, strictly speaking, 
+    // Gemini TTS works best with just the text but we can try to hint via punctuation/formatting if supported,
+    // or just rely on the Voice Model's inherent bias. 
+    // However, for Gemini 2.5 TTS, usually providing just the text is safer to avoid it reading the instructions.
+    // Instead, we rely on the Vision API (previous step) to have generated the text *in that style* (punctuation, word choice).
+    
+    // Safety: Ensure text isn't empty
+    if (!text || text.trim().length === 0) {
+        return res.status(400).send("No text provided");
+    }
 
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash-preview-tts',
-      contents: { parts: [{ text: styledText }] },
+      contents: { parts: [{ text: text }] },
       config: {
         responseModalities: ['AUDIO'],
         speechConfig: {
@@ -326,8 +288,6 @@ app.listen(PORT, async () => {
       },
     });
     await vite.listen();
-    // Vite usually listens on port 5173 or 3000 depending on config.
-    // We let Vite log its own startup message which includes the port.
     console.log(`   ➜ Frontend UI:  Wait for Vite output below...\n`);
   } catch (e) {
     console.error("Failed to start Vite server:", e);
