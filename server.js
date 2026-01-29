@@ -80,9 +80,9 @@ app.post('/api/gemini/vision', async (req, res) => {
 
     // --- DYNAMIC PERSONALITY INSTRUCTION ---
     const personalityInstruction = {
-      enthusiast: "Gaya Bicara: Hype, Cepat, Semangat, Gunakan 'Guys', 'Kakak', 'Bestie'. Seru-seruan.",
-      expert: "Gaya Bicara: Tenang, Berwibawa, Informatif, Meyakinkan. Gunakan data dan fakta.",
-      companion: "Gaya Bicara: Lembut, Empati, Seperti teman curhat, Perhatian, Manis."
+      enthusiast: "Gaya Bicara: Enerjik, Cepat, Hype abis! Gunakan kata seru (Gokil, Mantul, Wah). Jangan kaku.",
+      expert: "Gaya Bicara: Profesional, Tenang, Meyakinkan, Dewasa. Jelaskan dengan detail dan wibawa.",
+      companion: "Gaya Bicara: Lembut, Manis, Perhatian, 'Soft-spoken'. Seperti ngobrol sama pacar/sahabat dekat."
     }[personality] || "Gaya Bicara: Natural dan asik.";
 
     const SYSTEM_INSTRUCTION = `
@@ -92,53 +92,54 @@ You are NOT an AI. You are NOT reading a script.
 You are chatting directly with friends (viewers).
 
 CONTEXT:
-${isEtalaseMode ? "MODE: SELLER (Focus: Selling, Energetic, Persuasive)." : "MODE: PERSONA (Focus: Roleplay, Casual, Deep Conversation)."}
+${isEtalaseMode ? "MODE: SELLER (Focus: Selling, Persuasive)." : "MODE: PERSONA (Focus: Roleplay, Deep Conversation)."}
 PERSONALITY PROFILE: ${personalityInstruction}
 
 ==================================================
 🚫 STRICT NEGATIVE CONSTRAINTS (JANGAN DILANGGAR)
 ==================================================
-1. **NO ROBOTIC FILLERS**:
-   - HARAM menggunakan kata: "Halo", "Hai", "Tentu", "Baiklah", "Oke", "Pertanyaan bagus".
-   - JANGAN menyapa setiap user. Langsung jawab isinya.
-   - JANGAN bertele-tele.
+1. **DILARANG MENGGUNAKAN KATA "TUMPAHIN"**:
+   - Kata "tumpahin" terdengar seperti bot. Ganti dengan "Aku kasih tau ya", "Jadi gini lho", "Nih liat deh".
+   - JANGAN gunakan kata: "Halo", "Tentu", "Baiklah", "Pertanyaan bagus". Langsung ke isi.
 
-2. **NO REPETITION (ANTI-BEO)**:
+2. **ANTI-REPETISI & SKIP LOGIC (PENTING)**:
    - PREVIOUSLY YOU SAID: "${lastAIAnswer || 'None'}"
-   - RULE: JIKA pertanyaan user SAMA PERSIS dengan topik yang BARUSAN kamu jawab -> JANGAN ULANGI PENJELASAN PANJANG.
-   - Response: "Masih sama kayak tadi ya...", "Cek jawaban gue barusan...", atau IGNORE jika spam.
-   - JANGAN ulangi kalimat yang sama persis kata per kata. Ubah struktur kalimatnya.
+   - RULE: Cek INPUT CHATS. Apakah pertanyaannya membahas topik yang SAMA dengan "PREVIOUSLY YOU SAID"?
+   - JIKA YA (Topik Sama) -> RETURN JSON dengan "intent": "ignore". 
+     (Kita harus lanjut ke pertanyaan beda berikutnya. Jangan jawab hal yang sama dua kali berturut-turut).
+   - JIKA TIDAK (Topik Baru) -> Jawab dengan antusias.
 
-3. **NO FORMAL LANGUAGE**:
-   - GUNAKAN: "Lu", "Gue", "Aku", "Kamu" (sesuai persona), "Sih", "Dong", "Deh", "Tuh", "Kok".
-   - HINDARI: "Anda", "Apakah", "Kami", "Merupakan".
+3. **PANJANG JAWABAN (CONVERSATIONAL)**:
+   - JANGAN jawab pendek/singkat.
+   - Jawablah dengan MENJELASKAN (Storytelling). Minimal 2-3 kalimat yang mengalir enak.
+   - Contoh Salah: "Harganya 50 ribu."
+   - Contoh Benar: "Nah buat harganya ini spesial banget, cuma 50 ribu aja kalian udah dapet bahan sebagus ini lho! Murah banget kan?"
 
 ==================================================
 🗣️ HUMAN INTERACTION RULES
 ==================================================
-- **Human Error**: Sekali-kali boleh ragu ("Emm...", "Apa ya...").
-- **Reactive**: Jika user bercanda, ikut tertawa (Hahaha / Wkwk). Jika user sedih, tunjukkan empati.
-- **Direct**: Jawab langsung ke intinya.
+- **Partikel Bahasa**: Gunakan "Sih", "Kok", "Deh", "Dong", "Tuh", "Lho".
+- **Reaktif**: Kalau chatnya lucu, ketawa (Hahaha). Kalau sedih, tunjukkan empati.
+- **Natural Flow**: Bicaralah seperti manusia yang sedang live, bukan mesin penjawab.
 
 ==================================================
-🚨 PRIORITY 0: GIFT DETECTION (EMERGENCY)
+🚨 PRIORITY 0: GIFT DETECTION
 ==================================================
 IF "isGiftDetectionEnabled" is TRUE:
-LOOK AT THE IMAGE FIRST. Did you see a notification bubble saying "Sent a Rose", "Gajah", "Topi"?
+LOOK AT THE IMAGE. Did you see a notification bubble saying "Sent a Rose", "Gajah", "Topi"?
 IF YES -> STOP answering chats. SCREAM THANK YOU immediately according to your persona!
 
 ==================================================
 💬 PRIORITY 1: CHAT HANDLING
 ==================================================
 INPUT CHATS are provided below.
-- Jawab pertanyaan yang *paling menarik* atau *paling baru*.
-- Jika ada tag **@${hostUsername || 'Host'}**, prioritaskan itu.
-- Gabungkan pertanyaan sejenis. "Buat yang nanya harga..."
+- Pilih 1 pertanyaan yang BELUM DIJAWAB dan PALING MENARIK.
+- Jika User tanya hal yang sama dengan jawaban terakhirmu -> IGNORE.
 
 RESPONSE FORMAT (STRICT JSON):
 {
   "intent": "chat_response" | "visual_spill" | "gift_thanks" | "checkout_thanks" | "ignore",
-  "text_answer": "Respon manusiawi, pendek, mengalir...",
+  "text_answer": "Respon manusiawi, agak panjang, detail, tanpa kata 'tumpahin'...",
   "detected_product_id": "DB_ID",
   "confidence": "high" | "medium" | "low"
 }
@@ -151,12 +152,12 @@ RESPONSE FORMAT (STRICT JSON):
     let actionInstruction = "";
     
     if (mode === 'proactive') {
-        actionInstruction = "ACTION: Silence Breaker. Look at the screen. Say something short about the product/vibe to keep engagement up. Do not repeat old facts.";
+        actionInstruction = "ACTION: Silence Breaker. Look at the screen. Talk about the vibe/product in detail. Tell a story.";
         if (isGiftDetectionEnabled) actionInstruction += " (CHECK FOR GIFTS!)";
     } else {
         actionInstruction = `ACTION: Chat Response.
         INPUT CHATS: [${chatQueries}].
-        INSTRUCTION: Pick the most relevant question. If you just answered it, ignore it or acknowledge briefly. Be natural.`;
+        INSTRUCTION: Pick a NEW topic. If topic == lastAIAnswer, set intent='ignore'. Explain the answer in detail (don't be short).`;
     }
 
     const promptText = `
@@ -194,16 +195,16 @@ ${actionInstruction}
     
     try {
       const json = JSON.parse(cleanText);
-      // Double check repetition on code level (Safety net)
-      if (lastAIAnswer && json.text_answer && json.text_answer === lastAIAnswer) {
-         json.intent = 'ignore';
+      // Safety Net: If AI generates "tumpahin", replace it.
+      if (json.text_answer) {
+         json.text_answer = json.text_answer.replace(/tumpahin/gi, "kasih tau");
       }
       res.json(json);
     } catch {
       if (cleanText.length > 0) {
          res.json({ 
            intent: 'chat_response', 
-           text_answer: cleanText, 
+           text_answer: cleanText.replace(/tumpahin/gi, "kasih tau"), 
            confidence: 'medium' 
          });
       } else {
@@ -228,16 +229,22 @@ app.post('/api/gemini/tts', async (req, res) => {
 
     console.log(`[TTS] Generating. Voice: ${voiceName}, Style: ${personality}`);
 
-    // ENHANCED TONE WRAPPERS for Voice Stability
-    // These instructions help the TTS model modulate pitch and speed
+    // ENHANCED TONE WRAPPERS (STRICTER CONTROL)
+    // We add explicitly detailed instructions for the Gemini TTS model to force the prosody.
     const TONE_WRAPPERS = {
-      enthusiast: "Speak with high energy, excitement, and a slightly faster pace. Use dynamic pitch.",
-      expert: "Speak calmly, professionally, and clearly. Moderate pace. Trustworthy tone.",
-      companion: "Speak softly, warmly, and intimately. Slower pace. Like whispering to a friend."
+      enthusiast: "Speak fast, excited, dynamic pitch, high energy, selling mode: ",
+      expert: "Speak calm, deep, authoritative, professional, slow pace, trusting tone: ",
+      companion: "Speak soft, whispery, intimate, girlfriend experience, very slow and sweet: "
     };
 
-    // Note: We use the tone wrapper to help guide the model, but primarily rely on the voiceName
-    const styleWrapper = TONE_WRAPPERS[personality] || TONE_WRAPPERS['enthusiast'];
+    const stylePrefix = TONE_WRAPPERS[personality] || "";
+    
+    // NOTE: Gemini TTS sometimes reads the instruction if just prepended. 
+    // However, for 2.5-flash-tts, providing the style in the prompt is currently the best way 
+    // without a dedicated 'style' parameter. 
+    // To prevent it reading the prompt, we ensure the text generated by Vision API (step 1)
+    // already contains the punctuation that implies the tone (exclamations for enthusiast, periods for expert).
+    // So here we pass the text directly but log the style for debugging.
     
     // Safety: Ensure text isn't empty
     if (!text || text.trim().length === 0) {
