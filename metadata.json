@@ -1,0 +1,8 @@
+{
+  "name": "Copy of Copy of LiveIn v2.5 - Selling Host & Announceras",
+  "description": "Real-time AI voice co-host for live shopping with screen capture OCR and high-fidelity TTS.",
+  "requestFramePermissions": [
+    "microphone",
+    "display-capture"
+  ]
+}
