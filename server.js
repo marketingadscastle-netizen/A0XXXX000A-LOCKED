@@ -236,12 +236,8 @@ app.post('/api/gemini/tts', async (req, res) => {
       companion: "Speak softly, warmly, and intimately. Slower pace. Like whispering to a friend."
     };
 
-    const styleInstruction = TONE_WRAPPERS[personality] || TONE_WRAPPERS['enthusiast'];
-    // We do NOT prepend the instruction to the text for TTS, strictly speaking, 
-    // Gemini TTS works best with just the text but we can try to hint via punctuation/formatting if supported,
-    // or just rely on the Voice Model's inherent bias. 
-    // However, for Gemini 2.5 TTS, usually providing just the text is safer to avoid it reading the instructions.
-    // Instead, we rely on the Vision API (previous step) to have generated the text *in that style* (punctuation, word choice).
+    // Note: We use the tone wrapper to help guide the model, but primarily rely on the voiceName
+    const styleWrapper = TONE_WRAPPERS[personality] || TONE_WRAPPERS['enthusiast'];
     
     // Safety: Ensure text isn't empty
     if (!text || text.trim().length === 0) {
