@@ -275,6 +275,8 @@ app.post('/api/gemini/tts', async (req, res) => {
     const targetGender = String(gender).toLowerCase();
     const voiceName = targetGender === 'male' ? 'Fenrir' : 'Kore';
 
+    console.log(`[TTS] Generating audio. Gender: ${targetGender}, Voice: ${voiceName}`);
+
     const TONE_WRAPPERS = {
       enthusiast: "[Spoken naturally like a real human, conversational, fast-paced, slightly imperfect flow, not robotic]",
       expert: "[Spoken confidently, natural flow, like a shopkeeper explaining, not reading]",

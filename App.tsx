@@ -110,6 +110,11 @@ const App: React.FC = () => {
     queueRef.current = queue;
   }, [queue]);
 
+  // Clear Audio Queue when Voice Profile Changes to ensure immediate switch
+  useEffect(() => {
+    audioQueueRef.current = [];
+  }, [gender, personality]);
+
   // --- CAPTURE LOGIC ---
   const startCapture = async () => {
     setCaptureError(null);
