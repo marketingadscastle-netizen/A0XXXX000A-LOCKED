@@ -21,6 +21,12 @@ import {
 } from './types';
 import { DEFAULT_PRODUCTS } from './constants';
 
+// Interface for the Audio Queue
+interface AudioQueueItem {
+  buffer: AudioBuffer;
+  logEntry: LogEntry;
+}
+
 const App: React.FC = () => {
   // --- STATE MANAGEMENT ---
   const [products, setProducts] = useState<ProductData[]>(DEFAULT_PRODUCTS);
@@ -55,14 +61,12 @@ const App: React.FC = () => {
   const [latency, setLatency] = useState<number>(0);
 
   // --- CAPTURE REGIONS (Refs for logic, State for UI) ---
-  // Using refs ensures high-frequency updates (dragging) don't reset the Interval loops
   const chatBoxRef = useRef<Region>({ x: 400, y: 300, width: 250, height: 300 });
   const visionBoxRef = useRef<Region>({ x: 50, y: 50, width: 300, height: 300 });
 
   const [visionBox, setVisionBox] = useState<Region>(visionBoxRef.current);
   const [chatBox, setChatBox] = useState<Region>(chatBoxRef.current);
 
-  // Wrapper setters to sync State and Ref
   const updateChatBox = useCallback((newRegion: Region) => {
     setChatBox(newRegion);
     chatBoxRef.current = newRegion;
@@ -75,21 +79,30 @@ const App: React.FC = () => {
 
   // --- REFS ---
   const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null); // For OCR Cropping
-  const visionCanvasRef = useRef<HTMLCanvasElement>(null); // For Vision Cropping
+  const canvasRef = useRef<HTMLCanvasElement>(null); 
+  const visionCanvasRef = useRef<HTMLCanvasElement>(null); 
   const containerRef = useRef<HTMLDivElement>(null);
   const streamRef = useRef<MediaStream | null>(null); 
   const geminiService = useRef(new GeminiService());
   const ocrService = useRef(new OCRService());
   const audioContext = useRef<AudioContext | null>(null);
-  const processingRef = useRef(false);
-  const queueRef = useRef<ChatMessage[]>([]); 
+  
+  // PROCESSING REFS (MULTI-THINKING ARCHITECTURE)
+  const processingRef = useRef(false); // Prevents overlapping API calls
+  const queueRef = useRef<ChatMessage[]>([]); // Chat Queue
+  
+  // PLAYBACK REFS (VOICE STABILITY)
+  const audioQueueRef = useRef<AudioQueueItem[]>([]); // Holds prepared audio buffers
+  const isPlayingRef = useRef(false); // Prevents overlapping audio playback
 
   // --- INITIALIZATION ---
   useEffect(() => {
     ocrService.current.init();
     audioContext.current = new (window.AudioContext || (window as any).webkitAudioContext)();
-    return () => { ocrService.current.terminate(); };
+    return () => { 
+      ocrService.current.terminate(); 
+      if (audioContext.current) audioContext.current.close();
+    };
   }, []);
 
   // Sync state queue with ref
@@ -103,7 +116,6 @@ const App: React.FC = () => {
     try {
       const stream = await navigator.mediaDevices.getDisplayMedia({ 
         video: { 
-          // Request high resolution, but browser might scale it based on system
           width: { ideal: 1920 },
           height: { ideal: 1080 },
           frameRate: 15,
@@ -118,7 +130,6 @@ const App: React.FC = () => {
       
       stream.getVideoTracks()[0].onended = () => stopCapture();
     } catch (err: any) {
-      // Handle user cancellation gracefully without logging it as an error
       const isNotAllowed = err.name === 'NotAllowedError' || 
                            err.message?.toLowerCase().includes('denied') ||
                            err.message?.toLowerCase().includes('permission');
@@ -153,9 +164,10 @@ const App: React.FC = () => {
     setIsRunning(false); 
     setIsLocked(false);
     setStatus(SystemStatus.IDLE);
+    audioQueueRef.current = []; // Clear audio queue on stop
   };
 
-  // --- HELPER: ROBUST CROP LOGIC (Handling Object-Contain) ---
+  // --- CROP LOGIC ---
   const cropFrame = (
     targetCanvas: HTMLCanvasElement, 
     sourceVideo: HTMLVideoElement, 
@@ -165,46 +177,39 @@ const App: React.FC = () => {
      const ctx = targetCanvas.getContext('2d', { willReadFrequently: true });
      if (!ctx || sourceVideo.videoWidth === 0) return false;
 
-     // 1. Get Geometry
      const containerRect = container.getBoundingClientRect();
      if (containerRect.width === 0 || containerRect.height === 0) return false;
 
-     // 2. Determine Scale & Offsets (Pillarbox vs Letterbox)
      const videoRatio = sourceVideo.videoWidth / sourceVideo.videoHeight;
      const containerRatio = containerRect.width / containerRect.height;
      
      let displayedWidth, displayedHeight, offsetX, offsetY;
 
      if (containerRatio > videoRatio) {
-        // Pillarbox (Black bars on Left/Right)
         displayedHeight = containerRect.height;
         displayedWidth = displayedHeight * videoRatio;
         offsetX = (containerRect.width - displayedWidth) / 2;
         offsetY = 0;
      } else {
-        // Letterbox (Black bars on Top/Bottom)
         displayedWidth = containerRect.width;
         displayedHeight = displayedWidth / videoRatio;
         offsetX = 0;
         offsetY = (containerRect.height - displayedHeight) / 2;
      }
 
-     // 3. Map Region (Screen Coords) -> Source (Video Coords)
      const scaleX = sourceVideo.videoWidth / displayedWidth;
      const scaleY = sourceVideo.videoHeight / displayedHeight;
 
      const relativeX = region.x - offsetX;
      const relativeY = region.y - offsetY;
 
-     // Clamp coordinates to video bounds
      const sx = Math.max(0, relativeX * scaleX);
      const sy = Math.max(0, relativeY * scaleY);
      const sw = Math.min(region.width * scaleX, sourceVideo.videoWidth - sx);
      const sh = Math.min(region.height * scaleY, sourceVideo.videoHeight - sy);
 
-     if (sw <= 10 || sh <= 10) return false; // Ignore tiny crops
+     if (sw <= 10 || sh <= 10) return false;
 
-     // 4. Draw
      targetCanvas.width = sw;
      targetCanvas.height = sh;
 
@@ -220,7 +225,6 @@ const App: React.FC = () => {
       if (!videoRef.current || !canvasRef.current || !containerRef.current) return;
       if (videoRef.current.videoWidth === 0) return;
 
-      // Use Ref for coordinates to prevent dependency churn
       const success = cropFrame(canvasRef.current, videoRef.current, chatBoxRef.current, containerRef.current);
       if (!success) return;
 
@@ -229,32 +233,81 @@ const App: React.FC = () => {
         setChats(prev => [...newChats, ...prev].slice(0, 50));
         setQueue(prev => [...prev, ...newChats]);
       }
-    }, 1200); // Optimized to 1.2s for balance between load and speed
+    }, 1200);
 
     return () => clearInterval(interval);
   }, [isCapturing]); 
 
-  // --- AI PROCESSING LOOP ---
+  // --- AUDIO PLAYBACK CONTROLLER (THE VOICE BOX) ---
+  // This runs independently of the AI processing to ensure continuous flow
+  const playNextInQueue = useCallback(async () => {
+    if (isPlayingRef.current || audioQueueRef.current.length === 0 || !audioContext.current) {
+      if (audioQueueRef.current.length === 0 && !processingRef.current) {
+         setStatus(SystemStatus.ACTIVE); // Reset to Active/Listening if nothing is happening
+      }
+      return;
+    }
+
+    isPlayingRef.current = true;
+    setStatus(SystemStatus.SPEAKING);
+
+    const item = audioQueueRef.current.shift(); // Get next item
+    if (!item) {
+        isPlayingRef.current = false;
+        return;
+    }
+
+    // Add Log entry visually when we start speaking it
+    setLogs(prev => [item.logEntry, ...prev]);
+
+    try {
+      const source = audioContext.current.createBufferSource();
+      source.buffer = item.buffer;
+      source.connect(audioContext.current.destination);
+      source.start(0);
+
+      source.onended = () => {
+        isPlayingRef.current = false;
+        // Immediate Multi-Thinking: Trigger next playback instantly
+        playNextInQueue(); 
+      };
+    } catch (e) {
+      console.error("Audio Playback Error:", e);
+      isPlayingRef.current = false;
+      playNextInQueue();
+    }
+  }, []);
+
+  // Watch audio queue length to trigger playback if stopped
+  useEffect(() => {
+    if (audioQueueRef.current.length > 0 && !isPlayingRef.current) {
+        playNextInQueue();
+    }
+  }, [queue, playNextInQueue]); // Trigger when queue changes (indirectly) or manually called
+
+
+  // --- AI PROCESSING LOOP (THE BRAIN) ---
   useEffect(() => {
     if (!isCapturing || !isRunning) return;
 
     const processQueue = async () => {
+      // We can process NEW chats even if audio is currently playing (isPlayingRef is ignored here)
+      // We only block if we are currently *generating* a response (processingRef)
       if (processingRef.current || queueRef.current.length === 0) return;
       
       processingRef.current = true;
-      setStatus(SystemStatus.THINKING);
+      // Note: We don't set status to THINKING globally here to avoid flickering the UI 
+      // if audio is already playing (SPEAKING). The Audio Loop controls the visual status mostly.
+      if (!isPlayingRef.current) setStatus(SystemStatus.THINKING);
 
-      const batch = queueRef.current.slice(0, 10);
-      const remaining = queueRef.current.slice(10);
+      const batch = queueRef.current.slice(0, 8); // Smaller batch for faster reaction
+      const remaining = queueRef.current.slice(8);
       setQueue(remaining);
 
-      // Snapshot Image (VISION BOX CROP)
-      // Only process vision if enabled (always enabled in Etalase mode, optional in Host mode)
+      // --- VISION SNAPSHOT ---
       let imageBase64 = "";
       const shouldProcessVision = isEtalaseMode || hostVisionEnabled;
-
       if (shouldProcessVision && visionCanvasRef.current && videoRef.current && containerRef.current) {
-         // Use Ref for coordinates
          const success = cropFrame(visionCanvasRef.current, videoRef.current, visionBoxRef.current, containerRef.current);
          if (success) {
             imageBase64 = visionCanvasRef.current.toDataURL('image/jpeg', 0.6).split(',')[1];
@@ -264,14 +317,12 @@ const App: React.FC = () => {
       const start = Date.now();
       const mode = batch.length > 0 ? 'reactive' : 'proactive';
 
-      // Random proactive chatter if idle (40% chance)
-      if (mode === 'proactive' && Math.random() > 0.4) {
+      // Low chance of proactive chatter if we are already busy speaking or have queued audio
+      if (mode === 'proactive' && (audioQueueRef.current.length > 0 || isPlayingRef.current || Math.random() > 0.4)) {
          processingRef.current = false;
-         setStatus(SystemStatus.ACTIVE);
          return;
       }
 
-      // Get last answer to prevent repetition
       const lastAnswer = logs.length > 0 ? logs[0].answer : "";
 
       const response = await geminiService.current.processWithVision(
@@ -290,6 +341,7 @@ const App: React.FC = () => {
       setLatency(Date.now() - start);
 
       if (response.intent !== 'ignore' && response.text_answer) {
+        // --- 1. PREPARE LOG ENTRY ---
         const newLog: LogEntry = {
           id: Date.now().toString(),
           timestamp: Date.now(),
@@ -298,34 +350,38 @@ const App: React.FC = () => {
           answer: response.text_answer,
           intent: response.intent
         };
-        setLogs(prev => [newLog, ...prev]);
 
         if (response.detected_product_id) {
           setActiveProductId(response.detected_product_id);
           setTimeout(() => setActiveProductId(null), 10000); 
         }
 
-        setStatus(SystemStatus.SPEAKING);
+        // --- 2. GENERATE AUDIO (ASYNC) ---
+        // This is the "Thinking" part. It happens independently of playback.
         const audioData = await geminiService.current.generateTTS(response.text_answer, gender, personality);
         
         if (audioData && audioContext.current) {
           const buffer = await decodeAudioBuffer(audioData, audioContext.current);
-          const source = audioContext.current.createBufferSource();
-          source.buffer = buffer;
-          source.connect(audioContext.current.destination);
-          source.start(0);
           
-          await new Promise(resolve => {
-            source.onended = resolve;
-            setTimeout(resolve, buffer.duration * 1000 + 500); // Small buffer to prevent overlap
+          // --- 3. PUSH TO AUDIO QUEUE ---
+          // Instead of playing immediately, we queue it.
+          audioQueueRef.current.push({
+            buffer: buffer,
+            logEntry: newLog
           });
+
+          // --- 4. TRIGGER PLAYBACK IF IDLE ---
+          if (!isPlayingRef.current) {
+            playNextInQueue();
+          }
         }
       }
 
-      setStatus(SystemStatus.ACTIVE);
+      // Unlock processing immediately so we can fetch the next batch
+      // while the previous batch is still being spoken.
       processingRef.current = false;
       
-      // If messages piled up while thinking, process immediately
+      // If messages piled up, recurse immediately
       if (queueRef.current.length > 0) {
         setTimeout(processQueue, 100);
       }
@@ -333,7 +389,7 @@ const App: React.FC = () => {
 
     const loop = setInterval(processQueue, 1000);
     return () => clearInterval(loop);
-  }, [isCapturing, isRunning, isEtalaseMode, personality, gender, hostRoleDescription, isGiftDetectionEnabled, products, hostUsername, hostVisionEnabled, logs]);
+  }, [isCapturing, isRunning, isEtalaseMode, personality, gender, hostRoleDescription, isGiftDetectionEnabled, products, hostUsername, hostVisionEnabled, logs, playNextInQueue]);
 
   // --- UI RENDER ---
   const isVisionAreaVisible = isEtalaseMode || hostVisionEnabled;
