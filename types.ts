@@ -60,7 +60,7 @@ export enum SystemStatus {
 }
 
 export type HostGender = 'female' | 'male';
-export type HostPersonality = 'enthusiast' | 'expert' | 'companion';
+export type HostPersonality = 'enthusiast' | 'expert' | 'companion' | 'expressive';
 
 export interface Region {
   x: number;

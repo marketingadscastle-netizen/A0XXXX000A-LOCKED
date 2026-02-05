@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { Zap, BookOpen, Heart, Info } from 'lucide-react';
+import { Zap, BookOpen, Heart, Info, Sparkles } from 'lucide-react';
 import { HostPersonality } from '../types';
 import { PERSONALITY_PROFILES } from '../constants';
 
@@ -14,7 +14,8 @@ const PersonalitySelector: React.FC<Props> = ({ currentPersonality, onSelect, is
   const options: { id: HostPersonality, icon: any, color: string }[] = [
     { id: 'enthusiast', icon: Zap, color: 'text-amber-400' },
     { id: 'expert', icon: BookOpen, color: 'text-sky-400' },
-    { id: 'companion', icon: Heart, color: 'text-pink-400' }
+    { id: 'companion', icon: Heart, color: 'text-pink-400' },
+    { id: 'expressive', icon: Sparkles, color: 'text-purple-400' }
   ];
 
   return (
@@ -43,7 +44,7 @@ const PersonalitySelector: React.FC<Props> = ({ currentPersonality, onSelect, is
               <Icon className={`w-3.5 h-3.5 ${isActive && isProcessing ? 'animate-spin' : ''}`} />
               <div className="flex flex-col">
                 <span className="text-[8px] font-black uppercase tracking-tighter leading-none">
-                  {profile.name.split(' ')[1] || profile.name}
+                  {profile.name.split(' ')[0]}
                 </span>
               </div>
             </button>

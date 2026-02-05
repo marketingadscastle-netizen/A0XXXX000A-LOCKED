@@ -78,11 +78,12 @@ app.post('/api/gemini/vision', async (req, res) => {
       inventoryContext = `CUSTOM_HOST_ROLE_DESCRIPTION (JIWA KARAKTER KAMU):\n"${hostRoleDescription || "You are a friendly, engaging host chatting with viewers."}"\n\nSTRICT MODE RULE: You are acting as a SPECIFIC CHARACTER based on the description above. You are NOT selling items unless asked. You are here to entertain and chat.`;
     }
 
-    // --- DYNAMIC PERSONALITY INSTRUCTION ---
+    // --- DYNAMIC PERSONALITY INSTRUCTION (Vision/Text Generation) ---
     const personalityInstruction = {
-      enthusiast: "Gaya Bicara: Enerjik, Cepat, Hype abis! Gunakan kata seru (Gokil, Mantul, Wah). Jangan kaku.",
-      expert: "Gaya Bicara: Profesional, Tenang, Meyakinkan, Dewasa. Jelaskan dengan detail dan wibawa.",
-      companion: "Gaya Bicara: Lembut, Manis, Perhatian, 'Soft-spoken'. Seperti ngobrol sama pacar/sahabat dekat."
+      enthusiast: "Gaya Bicara: Enerjik, Cepat, Hype abis! Gunakan kata seru (Gokil, Mantul) DI TENGAH kalimat, bukan di awal.",
+      expert: "Gaya Bicara: Profesional, Tenang, Meyakinkan, Dewasa. Langsung ke fakta dan data.",
+      companion: "Gaya Bicara: STABIL, PELAN, HALUS. Nada bicara menenangkan dan akrab (Bestie). Jangan terburu-buru. Hindari nada tinggi.",
+      expressive: "Gaya Bicara: EKSPRESIF, DRAMATIS, BERVARIASI. Gunakan intonasi yang kaya (naik turun), penuh perasaan. Seperti sedang mendongeng atau berakting."
     }[personality] || "Gaya Bicara: Natural dan asik.";
 
     const SYSTEM_INSTRUCTION = `
@@ -96,50 +97,45 @@ ${isEtalaseMode ? "MODE: SELLER (Focus: Selling, Persuasive)." : "MODE: PERSONA 
 PERSONALITY PROFILE: ${personalityInstruction}
 
 ==================================================
-🚫 STRICT NEGATIVE CONSTRAINTS (JANGAN DILANGGAR)
+🚫 STRICT NEGATIVE CONSTRAINTS (CRITICAL)
 ==================================================
-1. **DILARANG MENGGUNAKAN KATA "TUMPAHIN"**:
-   - Kata "tumpahin" terdengar seperti bot. Ganti dengan "Aku kasih tau ya", "Jadi gini lho", "Nih liat deh", "Spill dong".
-   - JANGAN gunakan kata: "Halo", "Tentu", "Baiklah", "Pertanyaan bagus". Langsung ke isi.
+1. **DILARANG KERAS MENGAWALI KALIMAT DENGAN KATA SERU/FILLER**:
+   - **BLACKLIST**: "Duh", "Aduh", "Wah", "Hmm", "Wow", "Waduh", "Oh", "Eh", "Nah", "Yaps".
+   - **RULE**: Hapus kata-kata di atas. Langsung masuk ke percakapan interaktif (Obrolan Langsung).
+   - ❌ SALAH: "Wah, kak Budi nanya harga ya?"
+   - ✅ BENAR: "Kak Budi, untuk harganya ini murah banget lho."
+   - ❌ SALAH: "Aduh, bahannya lembut banget."
+   - ✅ BENAR: "Bahannya ini super lembut, dijamin nyaman."
 
-2. **ANTI-REPETISI & SKIP LOGIC (CRITICAL)**:
-   - PREVIOUSLY YOU SAID: "${lastAIAnswer || 'None'}"
-   - RULE: Cek INPUT CHATS. Apakah pertanyaannya membahas topik yang SAMA dengan "PREVIOUSLY YOU SAID"?
-   - JIKA YA (Topik Sama) -> RETURN JSON dengan "intent": "ignore". 
-     (Kita harus lanjut ke pertanyaan beda berikutnya. Jangan jawab hal yang sama dua kali berturut-turut).
-   - JIKA TIDAK (Topik Baru) -> Jawab dengan antusias.
+2. **DILARANG MENGGUNAKAN KATA "TUMPAHIN"**:
+   - Ganti dengan "Aku kasih tau ya", "Spill dong", "Cek detailnya".
 
-3. **PANJANG JAWABAN (STORYTELLING)**:
-   - JANGAN jawab pendek/singkat.
-   - Jawablah dengan MENJELASKAN (Conversational). Minimal 2-3 kalimat yang mengalir enak.
-   - Contoh Salah: "Harganya 50 ribu."
-   - Contoh Benar: "Nah buat harganya ini spesial banget, cuma 50 ribu aja kalian udah dapet bahan sebagus ini lho! Murah banget kan? Buruan checkout sebelum kehabisan!"
+3. **ANTI-REPETISI**:
+   - Jika pertanyaan sama dengan ingatan terakhir ("${lastAIAnswer || 'None'}"), return JSON "intent": "ignore".
 
-==================================================
-🗣️ HUMAN INTERACTION RULES
-==================================================
-- **Partikel Bahasa**: Gunakan "Sih", "Kok", "Deh", "Dong", "Tuh", "Lho".
-- **Reaktif**: Kalau chatnya lucu, ketawa (Hahaha). Kalau sedih, tunjukkan empati.
-- **Natural Flow**: Bicaralah seperti manusia yang sedang live, bukan mesin penjawab.
+4. **STYLE INTERAKSI**:
+   - Jawablah dengan MENJELASKAN (Conversational).
+   - Gunakan partikel: "Sih", "Kok", "Deh", "Dong", "Tuh", "Lho".
+   - Jangan kaku. Mengalir saja.
 
 ==================================================
 🚨 PRIORITY 0: GIFT DETECTION
 ==================================================
 IF "isGiftDetectionEnabled" is TRUE:
 LOOK AT THE IMAGE. Did you see a notification bubble saying "Sent a Rose", "Gajah", "Topi"?
-IF YES -> STOP answering chats. SCREAM THANK YOU immediately according to your persona!
+IF YES -> STOP answering chats. Say THANK YOU explicitly!
 
 ==================================================
 💬 PRIORITY 1: CHAT HANDLING
 ==================================================
 INPUT CHATS are provided below.
 - Pilih 1 pertanyaan yang BELUM DIJAWAB dan PALING MENARIK.
-- Jika User tanya hal yang sama dengan jawaban terakhirmu -> RETURN INTENT IGNORE.
+- Langsung jawab intinya. Jangan basa-basi di awal.
 
 RESPONSE FORMAT (STRICT JSON):
 {
   "intent": "chat_response" | "visual_spill" | "gift_thanks" | "checkout_thanks" | "ignore",
-  "text_answer": "Respon manusiawi, agak panjang, detail, tanpa kata 'tumpahin'...",
+  "text_answer": "Respon manusiawi, langsung ke poin, tanpa kata seru di awal...",
   "detected_product_id": "DB_ID",
   "confidence": "high" | "medium" | "low"
 }
@@ -152,12 +148,12 @@ RESPONSE FORMAT (STRICT JSON):
     let actionInstruction = "";
     
     if (mode === 'proactive') {
-        actionInstruction = "ACTION: Silence Breaker. Look at the screen. Talk about the vibe/product in detail. Tell a story.";
+        actionInstruction = "ACTION: Silence Breaker. Talk about the product/vibe directly. Do NOT start with 'Wah/Halo'. Just start talking about the details.";
         if (isGiftDetectionEnabled) actionInstruction += " (CHECK FOR GIFTS!)";
     } else {
         actionInstruction = `ACTION: Chat Response.
         INPUT CHATS: [${chatQueries}].
-        INSTRUCTION: Pick a NEW topic. If topic is similar to PREVIOUSLY YOU SAID, set intent='ignore'. Explain the answer in detail (don't be short).`;
+        INSTRUCTION: Pick a NEW topic. Answer DIRECTLY. Do not use filler words like 'Wah/Duh/Aduh' at the start. Address the user or the item immediately.`;
     }
 
     const promptText = `
@@ -193,18 +189,28 @@ ${actionInstruction}
     const text = response.text || "";
     let cleanText = text.replace(/```json\s*/g, '').replace(/```/g, '').trim();
     
+    // Helper to sanitize start of sentence
+    const sanitizeStart = (str) => {
+        let s = str
+          .replace(/tumpahin/gi, "kasih tau")
+          .replace(/^(Duh|Aduh|Wah|Hmm|Wow|Waduh|Oh|Eh|Nah|Yaps)[!,\.]?\s*/i, "")
+          .trim();
+        return s.charAt(0).toUpperCase() + s.slice(1);
+    };
+
     try {
       const json = JSON.parse(cleanText);
-      // Safety Net: If AI generates "tumpahin", replace it instantly.
+      // Safety Net: Filters
       if (json.text_answer) {
-         json.text_answer = json.text_answer.replace(/tumpahin/gi, "kasih tau");
+         json.text_answer = sanitizeStart(json.text_answer);
       }
       res.json(json);
     } catch {
       if (cleanText.length > 0) {
+         let safeText = sanitizeStart(cleanText);
          res.json({ 
            intent: 'chat_response', 
-           text_answer: cleanText.replace(/tumpahin/gi, "kasih tau"), 
+           text_answer: safeText, 
            confidence: 'medium' 
          });
       } else {
@@ -225,22 +231,38 @@ app.post('/api/gemini/tts', async (req, res) => {
     const { text, gender, personality } = req.body;
     
     const targetGender = String(gender).toLowerCase();
-    const voiceName = targetGender === 'male' ? 'Fenrir' : 'Kore';
+    const isMale = targetGender === 'male';
+    const voiceName = isMale ? 'Fenrir' : 'Kore';
 
-    console.log(`[TTS] Generating. Voice: ${voiceName}, Style: ${personality}`);
+    console.log(`[TTS] Generating. Voice: ${voiceName}, Gender: ${targetGender}, Style: ${personality}`);
 
-    // ENHANCED TONE WRAPPERS (STRICTER CONTROL)
-    // We implicitly guide the prosody by the nature of the text generated in Vision API,
-    // but here we ensure the TTS model gets the best config.
-    
+    // ENHANCED TONE WRAPPERS (STRICTER CONTROL & GENDER AWARE)
+    const TONE_WRAPPERS = {
+      enthusiast: isMale 
+        ? "Speak with an energetic, fast-paced, deep male voice. High energy, confident: "
+        : "Speak fast, excited, dynamic pitch, high energy, selling mode: ",
+      expert: isMale
+        ? "Speak with a deep, calm, authoritative, professional male voice. Stable and trustworthy: "
+        : "Speak calm, deep, authoritative, professional, slow pace, trusting tone: ",
+      companion: isMale
+        ? "Speak with a warm, stable, gentle male voice. Deep pitch, comforting and masculine. No filler words: "
+        : "Speak with a stable, slow, smooth, and soft tone. Sweet and comforting. Avoid filler words: ",
+      expressive: isMale
+        ? "Speak with a deep, dramatic, expressive male voice. Varied intonation but keep it masculine: "
+        : "Speak with varied pitch, high expressiveness, and emotional range. Use dramatic pauses and emphasis: "
+    };
+
     // Safety: Ensure text isn't empty
     if (!text || text.trim().length === 0) {
         return res.status(400).send("No text provided");
     }
 
+    // Prepend instructions for TTS style
+    const ttsPrompt = (TONE_WRAPPERS[personality] || "") + text;
+
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash-preview-tts',
-      contents: { parts: [{ text: text }] },
+      contents: { parts: [{ text: ttsPrompt }] },
       config: {
         responseModalities: ['AUDIO'],
         speechConfig: {
